@@ -1,0 +1,16 @@
+numpy
+scipy
+sklearn
+matplotlib
+pandas
+seaborn
+nose # tests
+pytest-cov
+ipython
+notebook
+jupyter
+black # code formatting
+rope # refactoring lib
+pbar
+nb_black # black code formatting in notebboks
+coverage
