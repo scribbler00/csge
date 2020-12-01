@@ -81,7 +81,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         # TODO: do we need to refit on complete data?
 
-        # TODO: create error matrix
+        # same as the local error
         self._create_error_matrix(X, y)
         self._get_global_error()
 
