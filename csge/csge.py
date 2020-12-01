@@ -8,13 +8,14 @@ import numpy as np
 
 from sklearn.metrics import mean_squared_error
 from sklearn.base import BaseEstimator
+from sklearn.model_selection import cross_val_score
 
 
 class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def __init__(
         self,
         ensembles,
-        error_function=None,
+        error_function=mean_squared_error,
         optimization_method="Newton-CG",
         eta=[3.5, 3.5, 3.5],
         n_jobs=1,
@@ -27,7 +28,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.n_jobs = n_jobs
 
     def fit(self, X, y):
-        pass
+        self.global_errors = []
+        for ensemble in self.ensembles:
+            scores = cross_val_score(ensemble(), X, y, cv=3)
+            self.global_errors.append(scores)
 
     def predict(self, X):
-        pass
+        return self.global_errors
