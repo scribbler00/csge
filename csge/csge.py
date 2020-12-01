@@ -79,9 +79,15 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
+        # TODO: do we need to refit on complete data?
+
         # TODO: create error matrix
         self._create_error_matrix(X, y)
         self._get_global_error()
+
+        # TODO: soft max
+        # TODO: fit to pred local error
+        # TODO: weighting
 
     def predict(self, X):
         return self.ensemble_members
