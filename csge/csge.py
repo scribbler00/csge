@@ -12,6 +12,7 @@ from sklearn.model_selection import cross_val_score
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection import KFold
 from sklearn.exceptions import NotFittedError
+from sklearn.ensemble import RandomForestRegressor
 
 
 class CoopetitiveSoftGatingEnsemble(BaseEstimator):
@@ -21,6 +22,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         error_function=mean_squared_error,
         optimization_method="Newton-CG",
         n_cv_out_of_sample_error=3,
+        model_forecast_local_error=RandomForestRegressor,
         eta=[3.5, 3.5, 3.5],
         n_jobs=1,
     ):
@@ -28,7 +30,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # TODO: add check if parameters for ensemble member are correct
         # TODO: add function to get name from ensemble member
 
-        self.ensembles = ensembles
+        self.ensembles_types = ensembles
         self.error_function = error_function
         self.optimization_method = optimization_method
         self.eta = eta
@@ -36,11 +38,24 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
         self.ensemble_members = None
         self.error_matrix = None
+        self.model_forecast_local_error = model_forecast_local_error
+
+    def sum_all_weights(self, weights):
+        sum_of_all_weights = np.full((self.leadtime_k, self.number_of_targets), 0.0)
+
+        for weight in self.weights:
+            sum_of_all_weights = np.add(sum_of_all_weights, weight.weight)
+
+        return sum_of_all_weights
+
+    def _normalize_weighting(self, weights):
+        sum_weights = weights.sum(1).reshape(-1, 1)
+
+        return weights / sum_weights
 
     def _get_global_error(self):
-        self.global_errors = np.ones_like(self.error_matrix) * self.error_matrix.mean(
-            1
-        ).reshape(-1, 1)
+        # self.global_errors = np.ones_like(self.error_matrix) / self.error_matrix.mean(0)
+        self.global_errors = (1 / self.error_matrix.mean(0)).reshape(1, -1)
 
     def _create_error_matrix(self, X, y):
         self.error_matrix = None
@@ -58,6 +73,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                     ] = self.error_function(
                         np.array(y[test_index][sample_id]), np.array(preds[sample_id])
                     )
+        self.error_matrix = self.error_matrix.transpose()
 
     def fit(self, X, y):
         # TODO: add time dependent weighting
@@ -69,8 +85,36 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             (train_index, test_index) for train_index, test_index in kf.split(X)
         ]
 
-        # fit ensemble members
-        for ensemble in self.ensembles:
+        # fit ensemble members to create out of sample errors
+        self.fit_out_of_sample_ensembles(X, y)
+
+        # TODO: do we need to refit on complete data?
+
+        # same as the local error
+        self._create_error_matrix(X, y)
+        self._get_global_error()
+
+        self.fit_ensembles_for_prediction(X, y)
+
+        # TODO: soft max
+        # TODO: fit to pred local error
+        self.fit_local_error_forecast(X)
+
+        # TODO: weighting
+
+        # TODO: temp test for forecast
+        # self.final_weighting = self._normalize_weighting(self.global_errors)
+
+    def fit_local_error_forecast(self, X):
+        self.local_error_forecaster = []
+
+        for id_ens in range(len(self.ensemble_members)):
+            self.local_error_forecaster.append(
+                self.model_forecast_local_error().fit(X, self.error_matrix[:, id_ens])
+            )
+
+    def fit_out_of_sample_ensembles(self, X, y):
+        for ensemble in self.ensembles_types:
             kf = KFold(n_splits=self.n_cv_out_of_sample_error)
             cv_ensembles = []
             for train_index, _ in self.train_test_indexes:
@@ -79,15 +123,38 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
-        # TODO: do we need to refit on complete data?
+    def fit_ensembles_for_prediction(self, X, y):
+        self.ensemble_members = []
+        for ensemble in self.ensembles_types:
+            model = ensemble().fit(X, y.ravel())
+            self.ensemble_members.append(model)
 
-        # same as the local error
-        self._create_error_matrix(X, y)
-        self._get_global_error()
+    def _pred_all_ensembles(self, X):
+        predictions = np.zeros((len(X), len(self.ensemble_members)))
+        for id_em, ensemble_member in enumerate(self.ensemble_members):
+            predictions[:, id_em] = ensemble_member.predict(X)
 
-        # TODO: soft max
-        # TODO: fit to pred local error
-        # TODO: weighting
+        return predictions
+
+    def _pred_local_error(self, X):
+        local_errors = np.zeros((len(X), len(self.ensemble_members)))
+        for id_em, local_error_member in enumerate(self.local_error_forecaster):
+            local_errors[:, id_em] = local_error_member.predict(X)
+
+        return local_errors
+
+    def _weight_forecasts(self, X, predictions):
+        normalized_global_error = self._normalize_weighting(self.global_errors)
+
+        self.local_errors = 1 / self._pred_local_error(X)
+
+        final_weighting = self.local_errors * normalized_global_error
+        self.final_weighting = self._normalize_weighting(final_weighting)
+
+        return (predictions * self.final_weighting).sum(1)
 
     def predict(self, X):
-        return self.ensemble_members
+        predictions_ensembles = self._pred_all_ensembles(X)
+        predictions = self._weight_forecasts(X, predictions_ensembles)
+
+        return predictions
