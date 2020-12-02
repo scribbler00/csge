@@ -88,22 +88,18 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # fit ensemble members to create out of sample errors
         self.fit_out_of_sample_ensembles(X, y)
 
-        # TODO: do we need to refit on complete data?
-
         # same as the local error
         self._create_error_matrix(X, y)
         self._get_global_error()
 
+        # refit ensemble members on complete data
         self.fit_ensembles_for_prediction(X, y)
 
-        # TODO: soft max
-        # TODO: fit to pred local error
+        # fit to pred local error
         self.fit_local_error_forecast(X)
 
-        # TODO: weighting
-
-        # TODO: temp test for forecast
-        # self.final_weighting = self._normalize_weighting(self.global_errors)
+        # TODO: implement time dependent weighting
+        # TODO: implement soft gating
 
     def fit_local_error_forecast(self, X):
         self.local_error_forecaster = []
