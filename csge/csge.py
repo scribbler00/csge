@@ -40,6 +40,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
         self.ensemble_members = None
         self.error_matrix = None
+        self.ensemble_parameters = None
         self.model_forecast_local_error = model_forecast_local_error
 
     def sum_all_weights(self, weights):
@@ -49,6 +50,22 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             sum_of_all_weights = np.add(sum_of_all_weights, weight.weight)
 
         return sum_of_all_weights
+
+    def set_ensemble_parameters(self, parameters = []):
+        try:
+            assert len(parameters) == len(self.ensembles_types)
+            for params in parameters:
+                assert type(params) == dict
+        except AssertionError:
+            print("Invalid amount of parameters (dim 0 has to match 'ensembles_types')")
+            return
+        self.ensemble_parameters = parameters
+
+    def _assign_params(self, index, model):
+        if self.ensemble_parameters is not None:
+            model.set_params(**self.ensemble_parameters[index])
+        return model
+
 
     def _normalize_weighting(self, weights):
         sum_weights = weights.sum(1).reshape(-1, 1)
@@ -112,19 +129,23 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             )
 
     def fit_out_of_sample_ensembles(self, X, y):
-        for ensemble in self.ensembles_types:
+        for i, ensemble in enumerate(self.ensembles_types):
             kf = KFold(n_splits=self.n_cv_out_of_sample_error)
             cv_ensembles = []
             for train_index, _ in self.train_test_indexes:
                 # TODO: add params
-                model = ensemble().fit(X[train_index], y[train_index].ravel())
+                model = ensemble()
+                model = self._assign_params(i, model)
+                model.fit(X[train_index], y[train_index].ravel())
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
     def fit_ensembles_for_prediction(self, X, y):
         self.ensemble_members = []
-        for ensemble in self.ensembles_types:
-            model = ensemble().fit(X, y.ravel())
+        for i, ensemble in enumerate(self.ensembles_types):
+            model = ensemble()
+            model = self._assign_params(i, model)
+            model.fit(X, y.ravel())
             self.ensemble_members.append(model)
 
     def _pred_all_ensembles(self, X):
