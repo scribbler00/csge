@@ -63,7 +63,12 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
     def _assign_params(self, index, model):
         if self.ensemble_parameters is not None:
-            model.set_params(**self.ensemble_parameters[index])
+            try:
+                model.set_params(**self.ensemble_parameters[index])
+            except ValueError:
+                print(f"Unable to assign parameters to {model}.\n")
+                print(f"Given parameters: {list(self.ensemble_parameters[index].keys())}.\n")
+                print(f"Valid parameters: {list(model.get_params().keys())}.\n")
         return model
 
 
