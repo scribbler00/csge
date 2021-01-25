@@ -14,6 +14,8 @@ from sklearn.model_selection import KFold
 from sklearn.exceptions import NotFittedError
 from sklearn.ensemble import RandomForestRegressor
 
+from csge import utils
+
 
 class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def __init__(
@@ -141,8 +143,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
     def _weight_forecasts(self, X, predictions):
         normalized_global_error = self._normalize_weighting(self.global_errors)
+        normalized_global_error = utils.soft_gating_formular(normalized_global_error, self.eta[0])
 
         self.local_errors = 1 / self._pred_local_error(X)
+        self.local_errors = utils.soft_gating_formular(self.local_errors, self.eta[1])
 
         final_weighting = self.local_errors * normalized_global_error
         self.final_weighting = self._normalize_weighting(final_weighting)
