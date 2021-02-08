@@ -26,6 +26,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         n_cv_out_of_sample_error=3,
         model_forecast_local_error=RandomForestRegressor,
         eta=[3.5, 3.5, 3.5],
+        eps = 0.00000001,
         n_jobs=1,
     ):
         """
@@ -55,6 +56,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.error_function = error_function
         self.optimization_method = optimization_method
         self.eta = eta
+        self.eps = eps
         self.n_jobs = n_jobs
         self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
         self.ensemble_members = None
@@ -135,7 +137,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 preds = ensemble_member[idx].predict(X[test_index]).reshape(-1, 1)
                 for sample_id in range(len(test_index)):
                     self.error_matrix[
-                        ens_id, sample_id * idx + sample_id
+                        ens_id, len(test_index) * idx + sample_id
                     ] = self.error_function(
                         np.array(y[test_index][sample_id]), np.array(preds[sample_id])
                     )
@@ -238,7 +240,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # Predict the local error of all ensemble members for each input separately.
         # Apply the softgating function to select the linearity.
         # Shape: [len(X), len(ensemble_members)]
-        self.local_errors = 1 / self._pred_local_error(X)
+        self.local_errors = 1 / (self._pred_local_error(X) + self.eps)
         self.local_errors = utils.soft_gating_formular(self.local_errors, self.eta[1])
 
 
@@ -247,14 +249,14 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # over the whole input space it has been trained on.
         # This results in selecting the best best ensemble member for a given input (local space), with respect to
         # its overall performance.
-        final_weighting = self.local_errors * normalized_global_error
+        final_weighting = 1 / (self.local_errors * normalized_global_error)
         self.final_weighting = self._normalize_weighting(final_weighting)
 
         return (predictions * self.final_weighting).sum(1)
 
     def predict(self, X):
         """
-        Predict with all enselbme members, and combine their results according to multiple error types.
+        Predict with all ensemble members, and combine their results according to multiple error types.
         Parameters
         ----------
         X : numpy.array
