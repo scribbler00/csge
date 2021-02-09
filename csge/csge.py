@@ -252,11 +252,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 model.fit(X, y.ravel())
             self.ensemble_members.append(model)
 
-    def _pred_all_ensembles(self, X):
-        predictions = np.zeros((len(X), len(self.t), len(self.ensemble_members)))
+    def _pred_all_ensembles(self, X, t):
+        predictions = np.zeros((len(X), len(t), len(self.ensemble_members)))
         for id_em, ensemble_member in enumerate(self.ensemble_members):
             if self.leadtime_k != 1:
-                predictions[:, :, id_em] = ensemble_member.predict(X, self.t)
+                predictions[:, :, id_em] = ensemble_member.predict(X, t)
             else:
                 predictions[:, :, id_em] = ensemble_member.predict(X)
 
@@ -321,7 +321,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         """
         if t is None:
             t = np.array([[0]])
-        predictions_ensembles = self._pred_all_ensembles(X)
+        predictions_ensembles = self._pred_all_ensembles(X, t)
         predictions = self._weight_forecasts(X, t, predictions_ensembles)
 
         return predictions
