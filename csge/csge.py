@@ -29,7 +29,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         eta=[3.5, 3.5, 3.5],
         eps = 0.00000001,
         n_jobs=1,
-        leadtime_k=1
+        leadtime_k=1,
+        type='regression'
     ):
         """
 
@@ -75,6 +76,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.model_forecast_time_error = model_forecast_time_error
         self.leadtime_k = leadtime_k
         self.t = None
+        self.type = type
 
     def sum_all_weights(self, weights):
         """
@@ -158,7 +160,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             sum_weights = weights.sum(1).reshape(-1, 1)
             weights /= sum_weights
         else:
-            sum_weights = weights.sum(2)#.sum(1).reshape(-1, 1, 1)
+            sum_weights = weights.sum(2)
             weights /= np.expand_dims(sum_weights, 2)
 
         return weights
@@ -188,26 +190,21 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         """
         self.error_matrix = None
-        global_errors = []
         num_samples = len(X)
         # TODO what in case of dict for len(self.ensembles)
         self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
-                #if self.leadtime_k != 1:
-                #    preds = ensemble_member[idx].predict(X[test_index], self.t)
-                #else:
-                #    preds = ensemble_member[idx].predict(X[test_index])
                 preds = ensemble_member[idx].predict(X[test_index]).reshape(-1)
                 preds = np.repeat(preds[:, np.newaxis], self.leadtime_k, axis=1)
                 for t in range(self.leadtime_k):
 
                     for sample_id in range(len(test_index)):
-                        self.error_matrix[
-                            t, ens_id, len(test_index) * idx + sample_id
-                        ] = self.error_function(
-                            np.array([y[test_index][sample_id][t]]), np.array([preds[sample_id, t]])
-                        )
+                        error = self.error_function(
+                            np.array([y[test_index][sample_id][t]]), np.array([preds[sample_id, t]]))
+                        if self.type == 'classification':
+                            error = 1-error
+                        self.error_matrix[t, ens_id, len(test_index) * idx + sample_id] = error
         self.error_matrix = self.error_matrix.transpose()
 
     def fit(self, X, y):
@@ -245,7 +242,6 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # same as the local error
         self._create_error_matrix(X, y)
         self._get_global_error()
-
         # refit ensemble members on complete data
         self._fit_ensembles_for_prediction(X, y)
 
@@ -277,7 +273,6 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.time_error_forecaster = []
         time_error_matrix = self.error_matrix
         time_error_matrix = time_error_matrix.mean(0).transpose()
-        #t = np.reshape(t, [-1, 1])
         for id_ens in range(len(self.ensemble_members)):
             self.time_error_forecaster.append(
                 self.model_forecast_time_error().fit(t, time_error_matrix[:, id_ens])
@@ -296,10 +291,6 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 model = ensemble()
                 model = self._assign_params(i, model)
                 model.fit(X[train_index], y[train_index].ravel())
-                #if self.leadtime_k != 1:
-                #    model.fit(X[train_index], self.t, y[train_index].ravel())
-                #else:
-                #    model.fit(X[train_index], y[train_index].ravel())
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
@@ -309,23 +300,13 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             model = ensemble()
             model = self._assign_params(i, model)
             model.fit(X, y.ravel())
-            # if self.leadtime_k != 1:
-            #     model.fit(X, self.t, y.ravel())
-            # else:
-            #     model.fit(X, y.ravel())
             self.ensemble_members.append(model)
 
     def _pred_all_ensembles(self, X):
         predictions = np.zeros((len(X), self.leadtime_k, len(self.ensemble_members)))
         for id_em, ensemble_member in enumerate(self.ensemble_members):
             pred = ensemble_member.predict(X).reshape(-1)
-            #print(np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1))
             predictions[:, :, id_em] = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
-
-            #if self.leadtime_k != 1:
-            #    predictions[:, :, id_em] = ensemble_member.predict(X, t)
-            #else:
-            #    predictions[:, :, id_em] = ensemble_member.predict(X)
 
         return predictions
 
@@ -369,9 +350,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             final_weighting.append(combined_weighting[i] * self.time_errors)
         final_weighting = np.array(final_weighting)
         final_weighting = 1 / final_weighting
-        #return final_weighting
         self.final_weighting = self._normalize_weighting(final_weighting)
-        return (predictions * self.final_weighting).sum(2)#.sum(1)
+        weighted_predictions = (predictions * self.final_weighting).sum(2)
+        if self.type == 'classification':
+            weighted_predictions = np.round(weighted_predictions)
+        return weighted_predictions
 
     def predict(self, X, t=None):
         """
