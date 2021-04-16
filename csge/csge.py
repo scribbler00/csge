@@ -195,8 +195,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
-                preds = ensemble_member[idx].predict(X[test_index]).reshape(-1)
-                preds = np.repeat(preds[:, np.newaxis], self.leadtime_k, axis=1)
+                preds = ensemble_member[idx].predict(X[test_index])
+                #preds = ensemble_member[idx].predict(X[test_index]).reshape(-1)
+                #preds = np.repeat(preds[:, np.newaxis], self.leadtime_k, axis=1)
+
                 for t in range(self.leadtime_k):
 
                     for sample_id in range(len(test_index)):
@@ -228,6 +230,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         -------
 
         """
+        if len(y.shape) == 1:
+            y = y.reshape(-1, 1)
         self.ensemble_members = []
         num_samples = len(X)
 
@@ -283,6 +287,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             self.t = np.arange(0, self.leadtime_k, 1)
         else:
             self.t = np.array([0])
+            # Ravel to remove add. dimension unnecessary for fitting
+            y = y.ravel()
         self.t = self.t.reshape(-1, 1)
         for i, ensemble in enumerate(self.ensembles_types):
             kf = KFold(n_splits=self.n_cv_out_of_sample_error)
@@ -290,23 +296,30 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             for train_index, _ in self.train_test_indexes:
                 model = ensemble()
                 model = self._assign_params(i, model)
-                model.fit(X[train_index], y[train_index].ravel())
+                model.fit(X[train_index], y[train_index])
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
     def _fit_ensembles_for_prediction(self, X, y):
+        if self.leadtime_k == 1:
+            # Ravel to remove add. dimension unnecessary for fitting
+            y = y.ravel()
         self.ensemble_members = []
         for i, ensemble in enumerate(self.ensembles_types):
             model = ensemble()
             model = self._assign_params(i, model)
-            model.fit(X, y.ravel())
+            model.fit(X, y)
             self.ensemble_members.append(model)
 
     def _pred_all_ensembles(self, X):
         predictions = np.zeros((len(X), self.leadtime_k, len(self.ensemble_members)))
         for id_em, ensemble_member in enumerate(self.ensemble_members):
-            pred = ensemble_member.predict(X).reshape(-1)
-            predictions[:, :, id_em] = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
+            pred = ensemble_member.predict(X)#.reshape(-1)
+            if pred.shape[1]==1:
+                pred = pred.reshape(-1)
+                pred = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
+            #predictions[:, :, id_em] = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
+            predictions[:, :, id_em] = pred
 
         return predictions
 
