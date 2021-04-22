@@ -395,14 +395,13 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # This results in selecting the best best ensemble member for a given input (local space), with respect to
         # its overall performance.
         combined_weighting = self.local_errors * normalized_global_error
-        final_weighting = []
-        #ToDo: Search better way to create this array
-        for i in range(combined_weighting.shape[0]):
-            final_weighting.append(combined_weighting[i] * self.time_errors)
-        final_weighting = np.array(final_weighting)
+        time_errors_reshaped = np.expand_dims(self.time_errors, 0)
+        combined_weighting_reshaped = np.expand_dims(combined_weighting, 1)
+        final_weighting = combined_weighting_reshaped * time_errors_reshaped
         final_weighting = 1 / final_weighting
         self.final_weighting = self._normalize_weighting(final_weighting)
         weighted_predictions = (predictions * self.final_weighting).sum(2)
+
         if self.type == 'classification':
             weighted_predictions = np.round(weighted_predictions)
         return weighted_predictions
