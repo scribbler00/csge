@@ -25,12 +25,13 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         optimization_method="Newton-CG",
         n_cv_out_of_sample_error=3,
         model_forecast_local_error=RandomForestRegressor,
-        model_forecast_time_error=RandomForestRegressor,
         eta=[3.5, 3.5, 3.5],
         eps = 0.00000001,
         n_jobs=1,
         leadtime_k=1,
-        type='regression'
+        #ToDo: Replace type by selction of 1-
+        type='regression',
+        ensemble_parameters = []
     ):
         """
 
@@ -90,6 +91,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         numpy.array
             sum of the given weights
         """
+        #ToDo: Gridsearch to test viability
         sum_of_all_weights = np.full((self.leadtime_k, self.number_of_targets), 0.0)
 
         for weight in self.weights:
@@ -117,7 +119,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             print("Invalid amount of parameters (dim 0 has to match 'ensembles_types')")
             return
         self.ensemble_parameters = parameters
-
+    
     def _assign_params(self, index, model):
         """
         Assign the given parameters to a specific model
@@ -175,7 +177,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # The slicing is due to this error not being time-dependent, thus only one index of this axis suffices
         self.global_errors = (1 / self.error_matrix[:,:,0].mean(0)).reshape(1, -1)
 
-    def _create_error_matrix(self, X, y):
+    def _create_error_matrix(self, X, target_ids, y):
         """
         Create a matrix containing errors for all x-indizes, timestamps, and ensemble-members
         Parameters
@@ -192,21 +194,29 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.error_matrix = None
         num_samples = len(X)
         # TODO what in case of dict for len(self.ensembles)
-        self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
+        self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), int(num_samples/self.leadtime_k)))
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
                 preds = ensemble_member[idx].predict(X[test_index])
+                target_ids_idx = target_ids[idx]
                 #preds = ensemble_member[idx].predict(X[test_index]).reshape(-1)
                 #preds = np.repeat(preds[:, np.newaxis], self.leadtime_k, axis=1)
 
                 for t in range(self.leadtime_k):
 
                     for sample_id in range(len(test_index)):
+                        pred = ensemble_member[idx].predict(X[test_index][sample_id].reshape(1, -1))[0]
+
+                        #print(np.array(pred), y[test_index][sample_id])
                         error = self.error_function(
-                            np.array([y[test_index][sample_id][t]]), np.array([preds[sample_id, t]]))
+                            np.array(y[test_index][sample_id]), np.array([pred])
+                        )
+                        #error = self.error_function(
+                        #    np.array([y[test_index][sample_id][t]]), np.array([preds[sample_id, t]]))
                         if self.type == 'classification':
                             error = 1-error
-                        self.error_matrix[t, ens_id, len(test_index) * idx + sample_id] = error
+                        self.error_matrix[target_ids[sample_id], ens_id, int((len(test_index) * idx + sample_id)/self.leadtime_k)] = error
+                        #self.error_matrix[t, ens_id, len(test_index) * idx + sample_id] = error
         self.error_matrix = self.error_matrix.transpose()
 
     def fit(self, X, y):
@@ -230,9 +240,28 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         -------
 
         """
+        #ToDo: X as a matrix
+        #[[1,2,3]->TS1]
+        #[1, 2, 3]->TS2]
+        #[1, 2, 3]->TS3]
+        #[1, 2, 3]->TS4]
+        #[1, 2, 3]->TS5]
+        #[1, 2, 3]->TS1]
+        #Step 2: Pass array [1,2,...,24,1,2,...]
+        X_feat = X
+        ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)
+        if X.shape[1] != 1:
+            ts_idx = X[:, -1].astype(int)
+            X_feat = X_feat[:, :-1]
+        else:
+            ts_idx = np.arange(0, self.leadtime_k).reshape(-1, 1).repeat(int(X_feat.shape[0] / self.leadtime_k),
+                                                                axis=1).transpose().reshape(-1, 1)
+            #for t in range(self.leadtime_k):
+            #    ts_idx[t::self.leadtime_k] = t
+
         if len(y.shape) == 1:
             y = y.reshape(-1, 1)
-        self.ensemble_members = []
+
         num_samples = len(X)
 
         kf = KFold(n_splits=self.n_cv_out_of_sample_error)
@@ -240,20 +269,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             (train_index, test_index) for train_index, test_index in kf.split(X)
         ]
 
-        # fit ensemble members to create out of sample errors
-        self._fit_out_of_sample_ensembles(X, y)
-
-        # same as the local error
-        self._create_error_matrix(X, y)
-        self._get_global_error()
-        # refit ensemble members on complete data
-        self._fit_ensembles_for_prediction(X, y)
-
-        # fit predictor to local error
-        self._fit_local_error_forecast(X)
 
         # fit predictor to time-dependent error
-        self._fit_time_error_forecast(self.t)
+        self._fit_time_error_forecast()
 
     def _fit_local_error_forecast(self, X):
         """
@@ -273,14 +291,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 self.model_forecast_local_error().fit(X, self.error_matrix[:, id_ens, 0])
             )
 
-    def _fit_time_error_forecast(self, t):
+    def _fit_time_error_forecast(self):
+        # as the number of timesteps anf the values are always constant,
+        # there is no need to train a predictor
         self.time_error_forecaster = []
-        time_error_matrix = self.error_matrix
-        time_error_matrix = time_error_matrix.mean(0).transpose()
-        for id_ens in range(len(self.ensemble_members)):
-            self.time_error_forecaster.append(
-                self.model_forecast_time_error().fit(t, time_error_matrix[:, id_ens])
-            )
+        self.time_error_matrix = self.error_matrix.mean(0).transpose()
 
     def _fit_out_of_sample_ensembles(self, X, y):
         if self.leadtime_k != 1:
@@ -294,9 +309,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             kf = KFold(n_splits=self.n_cv_out_of_sample_error)
             cv_ensembles = []
             for train_index, _ in self.train_test_indexes:
-                model = ensemble()
-                model = self._assign_params(i, model)
-                model.fit(X[train_index], y[train_index])
+                #ToDo: Do the following lines in general fitting function
+                model = self._fit_one_model(ensemble, i, X[train_index], y[train_index])
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
@@ -330,14 +344,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         return local_errors
 
-    def _pred_time_error(self, t):
-        time_errors = np.zeros((len(t), len(self.ensemble_members)))
-        for id_em, time_error_member in enumerate(self.time_error_forecaster):
-            time_errors[:, id_em] = time_error_member.predict(t)
-
-        return time_errors
-
-    def _weight_forecasts(self, X, predictions):
+    def _weight_forecasts(self, X, ts_idx, predictions):
         # Normalize the global error of all ensemble members.
         # Apply the softgating function to select the linearity.
         # Shape: [1, len(ensemble_members)]
@@ -346,9 +353,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # Predict the local error of all ensemble members for each input separately.
         # Apply the softgating function to select the linearity.
         # Shape: [len(X), len(ensemble_members)]
-        self.local_errors = 1 / (self._pred_local_error(X) + self.eps)
+        self.local_errors = 1 / (self._pred_local_error(X[::self.leadtime_k]) + self.eps)
         self.local_errors = utils.soft_gating_formular(self.local_errors, self.eta[1])
-        self.time_errors = 1 / (self._pred_time_error(self.t) + self.eps)
+        self.time_errors = 1 / (self.time_error_matrix + self.eps)
         self.time_errors = utils.soft_gating_formular(self.time_errors, self.eta[2])
 
         # Multiply both error types.
@@ -382,9 +389,20 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         numpy.array
             shape: [samples, 1]
         """
+        #ToDo: Predict_proba
         if t is None:
             t = np.array([[0]])
-        predictions_ensembles = self._pred_all_ensembles(X)
-        predictions = self._weight_forecasts(X, predictions_ensembles)
+
+        num_samples = int(X.shape[0]/self.leadtime_k) * self.leadtime_k
+
+        X = X[-num_samples:]
+
+        X_feat = X
+        ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)
+        if X.shape[1] != 1:
+            ts_idx = X[:, -1].astype(int)
+            X_feat = X_feat[:, :-1]
+        predictions_ensembles = self._pred_all_ensembles(X_feat)
+        predictions = self._weight_forecasts(X_feat, ts_idx, predictions_ensembles)
 
         return predictions
