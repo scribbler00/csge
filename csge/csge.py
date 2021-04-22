@@ -74,10 +74,13 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.error_matrix = None
         self.ensemble_parameters = None
         self.model_forecast_local_error = model_forecast_local_error
-        self.model_forecast_time_error = model_forecast_time_error
         self.leadtime_k = leadtime_k
         self.t = None
         self.type = type
+
+        self.should_fit=True
+        if ensemble_parameters != []:
+            self._set_ensemble_parameters(ensemble_parameters)
 
     def sum_all_weights(self, weights):
         """
@@ -99,7 +102,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         return sum_of_all_weights
 
-    def set_ensemble_parameters(self, parameters=[]):
+    def set_ensembles(self, ensembles: list):
+        self.ensemble_members=[[ensemble] * self.n_cv_out_of_sample_error for ensemble in ensembles]
+        self.should_fit = False
+
+    def _set_ensemble_parameters(self, parameters):
         """
         Use the given list to set the ensemble member's parameters
         Parameters
@@ -270,6 +277,26 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         ]
 
 
+        if not self.should_fit:
+            self._create_error_matrix(X_feat, ts_idx, y)
+            self._get_global_error()
+            self.ensemble_members = [ensemble[0] for ensemble in self.ensemble_members]
+            
+        else:
+            self.ensemble_members = []
+            # fit ensemble members to create out of sample errors
+            self._fit_out_of_sample_ensembles(X_feat, y)
+
+            # same as the local error
+            self._create_error_matrix(X_feat, ts_idx, y)
+            self._get_global_error()
+            # refit ensemble members on complete data
+            self._fit_ensembles_for_prediction(X_feat, y)
+
+        # fit predictor to local error
+        # Only use every leadtime_k-th element, as X-values are the same for a number of steps
+        self._fit_local_error_forecast(X_feat[::self.leadtime_k])
+
         # fit predictor to time-dependent error
         self._fit_time_error_forecast()
 
@@ -320,20 +347,24 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             y = y.ravel()
         self.ensemble_members = []
         for i, ensemble in enumerate(self.ensembles_types):
-            model = ensemble()
-            model = self._assign_params(i, model)
-            model.fit(X, y)
+            model = self._fit_one_model(ensemble, i, X, y)
             self.ensemble_members.append(model)
+    
+    def _fit_one_model(self, ensemble, i, X, y):
+        model = ensemble()
+        model = self._assign_params(i, model)
+        model.fit(X, y)
+        return model
 
     def _pred_all_ensembles(self, X):
-        predictions = np.zeros((len(X), self.leadtime_k, len(self.ensemble_members)))
+        predictions = np.zeros((int(len(X)/self.leadtime_k), self.leadtime_k, len(self.ensemble_members)))
         for id_em, ensemble_member in enumerate(self.ensemble_members):
-            pred = ensemble_member.predict(X)#.reshape(-1)
-            if pred.shape[1]==1:
-                pred = pred.reshape(-1)
-                pred = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
-            #predictions[:, :, id_em] = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
-            predictions[:, :, id_em] = pred
+            for i, sample in enumerate(X[::self.leadtime_k]):
+                pred = ensemble_member.predict(sample.reshape(1, -1))
+                if len(pred.shape) == 1 or pred.shape[1] == 1:
+                    pred = pred.reshape(-1)
+                    pred = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
+                predictions[i, :, id_em] = pred
 
         return predictions
 
