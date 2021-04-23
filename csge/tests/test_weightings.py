@@ -63,7 +63,7 @@ class TestBasicRegression:
         model.eta = [0, 3.5, 0]
         model.fit(x_axis, targets)
         y0 = model.predict(x_axis)
-        assert np.isclose(y0, targets, atol=10).all()
+        assert np.abs(np.mean(y0 - targets)) < 0.2
     
     def testTimeWeighting(self):
         class f1:
