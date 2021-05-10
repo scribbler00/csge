@@ -31,7 +31,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         leadtime_k=1,
         #ToDo: Replace type by selction of 1-
         type='regression',
-        ensemble_parameters = []
+        ensemble_parameters = [],
+        probability = False
     ):
         """
 
@@ -79,6 +80,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.type = type
 
         self.should_fit=True
+        self.probability = probability
+        self.list_labels = None
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
 
@@ -266,6 +269,12 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             #for t in range(self.leadtime_k):
             #    ts_idx[t::self.leadtime_k] = t
 
+        # If a finite amount of labels is given (==only integers in list), enable the function predict_proba
+        if np.array(y).dtype==int:
+            self.list_labels = np.unique(np.array(y))
+
+
+
         if len(y.shape) == 1:
             y = y.reshape(-1, 1)
 
@@ -352,6 +361,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     
     def _fit_one_model(self, ensemble, i, X, y):
         model = ensemble()
+        # If predict_proba has been enabled, pass this parameter to all models to enable it
+        if hasattr(model, 'probability'):
+            model.probability = self.probability
         model = self._assign_params(i, model)
         model.fit(X, y)
         return model
@@ -375,7 +387,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         return local_errors
 
-    def _weight_forecasts(self, X, ts_idx, predictions):
+    
+    
+    def _calc_final_weighting(self, X):
         # Normalize the global error of all ensemble members.
         # Apply the softgating function to select the linearity.
         # Shape: [1, len(ensemble_members)]
@@ -400,13 +414,15 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         final_weighting = combined_weighting_reshaped * time_errors_reshaped
         final_weighting = 1 / final_weighting
         self.final_weighting = self._normalize_weighting(final_weighting)
-        weighted_predictions = (predictions * self.final_weighting).sum(2)
 
+    def _weight_forecasts(self, X, ts_idx, predictions):
+        self._calc_final_weighting(X)
+        weighted_predictions = (predictions * self.final_weighting).sum(2)
         if self.type == 'classification':
             weighted_predictions = np.round(weighted_predictions)
         return weighted_predictions
 
-    def predict(self, X, t=None):
+    def predict(self, X: np.ndarray, t: np.ndarray=None) -> np.ndarray:
         """
         Predict with all ensemble members, and combine their results according to multiple error types.
         Parameters
@@ -422,17 +438,31 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #ToDo: Predict_proba
         if t is None:
             t = np.array([[0]])
-
         num_samples = int(X.shape[0]/self.leadtime_k) * self.leadtime_k
 
         X = X[-num_samples:]
 
         X_feat = X
         ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)
-        if X.shape[1] != 1:
+        if X.shape[1] != 1 and self.leadtime_k > 1:
             ts_idx = X[:, -1].astype(int)
             X_feat = X_feat[:, :-1]
         predictions_ensembles = self._pred_all_ensembles(X_feat)
         predictions = self._weight_forecasts(X_feat, ts_idx, predictions_ensembles)
+
+        return predictions
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        if self.list_labels is None:
+            return
+        self._calc_final_weighting(X)
+
+        predictions = []
+        for ensemble_member in self.ensemble_members:
+            predictions.append(ensemble_member.predict_proba(X))
+        predictions = np.array(predictions)
+        predictions = predictions.swapaxes(0, 2)
+        predictions = (np.expand_dims(predictions, 2) * np.expand_dims(self.final_weighting, 0)).sum(axis=3)#[0]
+        predictions = predictions.squeeze(2).swapaxes(0, 1)
 
         return predictions
