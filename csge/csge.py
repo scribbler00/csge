@@ -260,7 +260,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #Step 2: Pass array [1,2,...,24,1,2,...]
         X_feat = X
         ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)
-        if X.shape[1] != 1:
+        if X.shape[1] != 1 and self.leadtime_k > 1:
             ts_idx = X[:, -1].astype(int)
             X_feat = X_feat[:, :-1]
         else:
