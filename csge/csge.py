@@ -360,12 +360,21 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def _pred_all_ensembles(self, X: np.ndarray):
         predictions = np.zeros((int(len(X)/self.leadtime_k), self.leadtime_k, len(self.ensemble_members)))
         for id_em, ensemble_member in enumerate(self.ensemble_members):
-            for i, sample in enumerate(X[::self.leadtime_k]):
+            for i, sample in enumerate(X):
                 pred = ensemble_member.predict(sample.reshape(1, -1))
-                if len(pred.shape) == 1 or pred.shape[1] == 1:
-                    pred = pred.reshape(-1)
-                    pred = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
-                predictions[i, :, id_em] = pred
+                index_t = i%self.leadtime_k
+                index_s = int(i/self.leadtime_k)
+                predictions[index_s, index_t, id_em] = pred
+            
+            # Deprecated, for now
+            # for i, sample in enumerate(X[::self.leadtime_k]):
+            #     print(i)
+            #     print(sample)
+            #     pred = ensemble_member.predict(sample.reshape(1, -1))
+            #     if len(pred.shape) == 1 or pred.shape[1] == 1:
+            #         pred = pred.reshape(-1)
+            #         pred = np.repeat(pred[:, np.newaxis], self.leadtime_k, axis=1)
+            #     predictions[i, :, id_em] = pred
 
         return predictions
 
