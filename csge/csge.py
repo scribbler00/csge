@@ -85,6 +85,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.ensemble_parameters = None
         self.should_fit=True
         self.t = None
+        self.start_indizes = None
+        self.flatten_indizes = None
         
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
@@ -167,6 +169,21 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 print(f"Valid parameters: {list(model.get_params().keys())}.\n")
         return model
 
+    def _transform_time_matrix(self, ts_idx: np.ndarray):
+        self.start_indizes = [0]
+        self.flatten_indizes = []
+        ts_id_old = -1
+        row_id = 0
+        coords = []
+        for i, ts_id in enumerate(ts_idx):
+            if ts_id <= ts_id_old:
+                self.start_indizes.append(i)
+                row_id += 1
+            ts_id_old = ts_id
+            self.flatten_indizes.append(row_id * self.leadtime_k + ts_id)
+
+            coords.append([row_id, ts_id])
+        return coords
 
     def _normalize_weighting(self, weights: np.ndarray):
         """
