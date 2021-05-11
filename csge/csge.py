@@ -302,7 +302,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             X_feat = X_feat[:, :-1]
         else:
             ts_idx = np.arange(0, self.leadtime_k).reshape(-1, 1).repeat(int(X_feat.shape[0] / self.leadtime_k),
-                                                                axis=1).transpose().reshape(-1, 1)
+                                                                axis=1).transpose().reshape(-1)
 
         if len(y.shape) == 1:
             y = y.reshape(-1, 1)
@@ -510,6 +510,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             ts_idx = X[:, -1].astype(int)
             X_feat = X_feat[:, :-1]
         else:
+            ts_idx = np.arange(0, self.leadtime_k).reshape(-1, 1).repeat(int(X_feat.shape[0] / self.leadtime_k),
+                                                                axis=1).transpose().reshape(-1)
 
         self._calc_final_weighting(X_feat, ts_idx)
 
