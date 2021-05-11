@@ -99,6 +99,6 @@ class TestBasicRegression:
         model.eta = [0, 0, 3.5]
         model.leadtime_k = 6
         model.fit(x_axis_csge, targets_csge)
-        y0 = model.predict(x_axis_csge)
+        y0 = model.predict(x_axis_csge).reshape(-1, 6)
         assert np.isclose(y0, targets).all()
 
