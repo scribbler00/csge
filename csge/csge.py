@@ -121,6 +121,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         ----------
         ensembles : list
             contains an object for each ensemble type
+            each ensemble member has to have the attribute '_estimator_type', and be either 'regressor' or 'classifier'
         """
         # duplicate the ensemble member to create the error_matrix
         self.ensemble_members=[[ensemble_member] * self.n_cv_out_of_sample_error for ensemble_member in ensembles]
