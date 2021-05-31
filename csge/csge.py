@@ -18,11 +18,13 @@ from sklearn.base import is_classifier, is_regressor
 
 from csge import utils
 
+import inspect
 
 class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def __init__(
         self,
-        ensembles: list,
+        #ensembles: list,
+        ensembles_types: list,
         error_function = mean_squared_error,
         optimization_method = "Newton-CG",
         n_cv_out_of_sample_error: int = 3,
@@ -70,7 +72,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # TODO: add check if parameters for ensemble member are correct
         # TODO: add function to get name from ensemble member
 
-        self.ensembles_types = ensembles
+        self.ensembles_types = ensembles_types
         self.error_function = error_function
         self.optimization_method = optimization_method
         self.eta = eta
@@ -84,12 +86,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         
         self.ensemble_members = None
         self.error_matrix = None
-        self.ensemble_parameters = None
+        self.ensemble_parameters = ensemble_parameters
         self.should_fit=True
         self.t = None
         self.start_indizes = None
         self.flatten_indizes = None
-        
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
 
@@ -176,7 +177,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         object
             ensemble member with set parameters
         """
-        if self.ensemble_parameters is not None:
+        if self.ensemble_parameters != []:
             try:
                 model.set_params(**self.ensemble_parameters[index])
             except ValueError:
