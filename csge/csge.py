@@ -14,6 +14,8 @@ from sklearn.model_selection import KFold
 from sklearn.exceptions import NotFittedError
 from sklearn.ensemble import RandomForestRegressor
 
+from sklearn.base import is_classifier, is_regressor
+
 from csge import utils
 
 
@@ -30,7 +32,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         n_jobs: int = 1,
         leadtime_k: int = 1,
         #ToDo: Replace type by selction of 1-
-        type: str = 'regression',
+        #type: str = 'regression',
         ensemble_parameters: list = [],
         probability: bool = False
     ):
@@ -77,7 +79,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
         self.model_forecast_local_error = model_forecast_local_error
         self.leadtime_k = leadtime_k
-        self.type = type
+        self.type = None
         self.probability = probability
         
         self.ensemble_members = None
@@ -217,6 +219,27 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # the slicing is due to this error not being time-dependent, thus only one index of this axis suffices
         self.global_errors = (1 / self.error_matrix[:,:,0].mean(0)).reshape(1, -1)
 
+    def _set_type(self):
+        method = None
+        assumption = None
+        if is_classifier(self.ensemble_members[0][0]):
+            assumption = 'classifier'
+            method = is_classifier
+        elif is_regressor(self.ensemble_members[0][0]):
+            assumption = 'regressor'
+            method = is_regressor
+        if method is not None:
+            check = True
+            for ensemble_member in self.ensemble_members:
+                if not method(ensemble_member[0]):
+                    check = False
+            if check:
+                self.type = assumption
+                return
+        print('Inconsistent types of ensemble members.')
+        return
+
+
     def _create_error_matrix(self, X: np.ndarray, target_ids: np.ndarray, y: np.ndarray):
         """
         Create a matrix containing errors for all x-indizes, timestamps, and ensemble-members
@@ -254,7 +277,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                         np.array(y[test_index][sample_id]), np.array([pred])
                     )
                     # in case of classification, accuracy instead of error is needed
-                    if self.type == 'classification':
+                    if self.type == 'classifier':
                         error = 1-error
                     # put the calculated error in the matrix at the associated forecast range
                     self.error_matrix[coord_2, ens_id, coord_1] = error
@@ -315,6 +338,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
 
         if not self.should_fit:
+            self._set_type()
             self._create_error_matrix(X_feat, ts_idx, y)
             self._get_global_error()
             # since all ensemble members of one type are duplicates, simply select the first one
@@ -325,6 +349,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             # fit ensemble members to create out of sample errors
             self._fit_out_of_sample_ensembles(X_feat, y)
             # same as the local error
+            self._set_type()
             self._create_error_matrix(X_feat, ts_idx, y)
             self._get_global_error()
             # refit ensemble members on complete data
@@ -450,7 +475,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self._calc_final_weighting(X, ts_idx)
         weighted_predictions = (predictions * self.final_weighting).sum(2)
 
-        if self.type == 'classification':
+        if self.type == 'classifier':
             weighted_predictions = np.round(weighted_predictions)
         return weighted_predictions
 
@@ -500,7 +525,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             shape: [len(X), num_labels]
             the probability of each label for each sample
         """
-        if self.type != 'classification':
+        if self.type != 'classifier':
             return
         
         X_feat = X
