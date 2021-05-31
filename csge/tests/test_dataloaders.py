@@ -52,11 +52,10 @@ class TestDateloader:
         f3 = sklearn.linear_model.Lasso
         f4 = sklearn.tree.DecisionTreeRegressor
         ensemble_csge = CSGE(
-            ensembles = [f1, f2, f3, f4],
+            ensembles_types = [f1, f2, f3, f4],
             error_function=mean_absolute_error,
             eta=eta,
             leadtime_k = leadtime,
-            type='regression',
             )
 
         for train_index, test_index in kf.split(X):

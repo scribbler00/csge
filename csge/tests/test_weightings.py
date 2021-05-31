@@ -12,11 +12,15 @@ class TestBasicRegression:
     def testGlobalWeighting(self):
 
         class f1:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 return np.reshape(np.sin(X), [-1, 1])
         class f2:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
@@ -38,11 +42,15 @@ class TestBasicRegression:
     
     def testLocalWeighting(self):
         class f1:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 return np.reshape(np.sin(X), [-1, 1])
         class f2:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
@@ -67,12 +75,16 @@ class TestBasicRegression:
     
     def testTimeWeighting(self):
         class f1:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 res = np.sin(X).reshape(-1)
                 return res
         class f2:
+            def __init__(self):
+                self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):

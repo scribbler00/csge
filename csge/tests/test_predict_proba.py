@@ -23,10 +23,9 @@ class TestPredictions:
 
 
         ensemble = CSGE(
-        ensembles = [sklearn.svm.SVC, sklearn.svm.SVC, sklearn.tree.DecisionTreeClassifier],
+        ensembles_types = [sklearn.svm.SVC, sklearn.svm.SVC, sklearn.tree.DecisionTreeClassifier],
         error_function=sklearn.metrics.accuracy_score,
         eta=[3.5, 3.5, 0],
-        type='classification',
         ensemble_parameters = params,
         probability=True
         )
