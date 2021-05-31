@@ -93,6 +93,19 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
 
+    def get_params(self, deep):
+        #print(inspect.getfullargspec(self.__init__).args)
+        params = {}
+        for param in inspect.getfullargspec(self.__init__).args[1:]:
+            if param[0]=='_':
+                continue
+            params[param] = getattr(self, param)
+        #print(params)
+        #for model in self.ensembles_types:
+        #    params[str(model)] = model()
+        #print(params)
+        return params
+
     def sum_all_weights(self, weights):
         """
         Calculate the sum of a given list of weights
