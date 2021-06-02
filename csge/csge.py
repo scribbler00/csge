@@ -13,6 +13,7 @@ from sklearn.model_selection import cross_validate
 from sklearn.model_selection import KFold
 from sklearn.exceptions import NotFittedError
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.decomposition import PCA
 
 from sklearn.base import is_classifier, is_regressor
 
@@ -36,7 +37,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #ToDo: Replace type by selction of 1-
         #type: str = 'regression',
         ensemble_parameters: list = [],
-        probability: bool = False
+        probability: bool = False,
+        pca_components: int = 0
     ):
         """
 
@@ -91,20 +93,19 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.t = None
         self.start_indizes = None
         self.flatten_indizes = None
+        self.pca = None
+        if pca_components > 0:
+            self.pca = PCA(n_components=pca_components)
+
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
 
     def get_params(self, deep):
-        #print(inspect.getfullargspec(self.__init__).args)
         params = {}
         for param in inspect.getfullargspec(self.__init__).args[1:]:
             if param[0]=='_':
                 continue
             params[param] = getattr(self, param)
-        #print(params)
-        #for model in self.ensembles_types:
-        #    params[str(model)] = model()
-        #print(params)
         return params
 
     def sum_all_weights(self, weights):
@@ -330,6 +331,14 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #[1, 2, 3]->TS5]
         #[1, 2, 3]->TS1]
         #Step 2: Pass array [1,2,...,24,1,2,...]
+        
+        if self.pca is not None:
+            print((X.shape[1]-1), self.pca.n_components)
+            if self.pca.n_components > (X.shape[1]-1):
+                raise ValueError("Number of PCA components may not surpass number of input features.")
+                
+            self.pca.fit(X[:, :-1])
+            X = np.concatenate([self.pca.transform(X[:, :-1]), X[:, -1].reshape(-1, 1)], axis=1)
 
         self.start_indizes = None
 
@@ -512,6 +521,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # ToDo: Enable matrizes with not all entries filled (fit and predict)
         #X = X[-num_samples:]
         #X = X[:num_samples]
+        if self.pca is not None:
+            X = np.concatenate([self.pca.transform(X[:, :-1]), X[:, -1].reshape(-1, 1)], axis=1)
         X_feat = X
         ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)        
         if X.shape[1] != 1 and self.leadtime_k > 1:
@@ -543,6 +554,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         if self.type != 'classifier':
             return
         
+        if self.pca is not None:
+            X = np.concatenate([self.pca.transform(X[:, :-1]), X[:, -1].reshape(-1, 1)], axis=1)
+
         X_feat = X
         ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)      
         
