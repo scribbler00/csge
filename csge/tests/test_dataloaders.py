@@ -8,7 +8,7 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
 
-class TestDateloader:
+class TestDataloader:
     def setUp(self):
         self.seed = 1337
         self.leadtime = 10
