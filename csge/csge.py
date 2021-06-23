@@ -29,11 +29,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         feature_indizes: list = [],
         error_function = mean_squared_error,
         optimization_method = "Newton-CG",
-        n_cv_out_of_sample_error: int = 3,
-        model_forecast_local_error = RandomForestRegressor,
         eta: list = [3.5, 3.5, 3.5],
         eps: float = 0.00000001,
         n_jobs: int = 1,
+        n_cv_out_of_sample_error: int = 3,
+        model_forecast_local_error = RandomForestRegressor,
         leadtime_k: int = 1,
         #ToDo: Replace type by selction of 1-
         #type: str = 'regression',
@@ -85,17 +85,18 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
         self.model_forecast_local_error = model_forecast_local_error
         self.leadtime_k = leadtime_k
-        self.type = None
+        self.ensemble_parameters = ensemble_parameters
         self.probability = probability
+        self.pca_components = pca_components
         
+        self.type = None
         self.ensemble_members = None
         self.error_matrix = None
-        self.ensemble_parameters = ensemble_parameters
-        self.should_fit=True
         self.t = None
         self.start_indizes = None
         self.flatten_indizes = None
         self.pca = None
+        self.should_fit=True
         if pca_components > 0:
             self.pca = PCA(n_components=pca_components)
 
