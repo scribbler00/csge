@@ -26,6 +26,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self,
         #ensembles: list,
         ensembles_types: list,
+        feature_indizes: list = [],
         error_function = mean_squared_error,
         optimization_method = "Newton-CG",
         n_cv_out_of_sample_error: int = 3,
@@ -75,6 +76,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # TODO: add function to get name from ensemble member
 
         self.ensembles_types = ensembles_types
+        self.feature_indizes = feature_indizes
         self.error_function = error_function
         self.optimization_method = optimization_method
         self.eta = eta
@@ -99,6 +101,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         if ensemble_parameters != []:
             self._set_ensemble_parameters(ensemble_parameters)
+        
+        if pca_components > 0 and self.feature_indizes is not None:
+            raise Exception("Unable to process PCA and split features at once.")
+
+        self.feature_split = False if len(self.feature_indizes) == 0 else True
 
     def get_params(self, deep):
         params = {}
@@ -277,18 +284,26 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         """
         coords = self._transform_time_matrix(target_ids)
         self.error_matrix = None
+
+
         num_samples = len(X)
+        if self.feature_split:
+            num_samples = len(X[0])
         self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
         
 
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
+            X_split = X
+            if self.feature_split:
+                X_split = X[ens_id]
             running_index = 0
             # for each ensemble type, use the idx-th member of this type to predict the data is has not been trained on
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
+                
                 for sample_id in range(len(test_index)):
                     ts_label = target_ids[running_index]
                     coord_1, coord_2 = coords[running_index]
-                    pred = ensemble_member[idx].predict(X[test_index][sample_id].reshape(1, -1))[0]
+                    pred = ensemble_member[idx].predict(X_split[test_index][sample_id].reshape(1, -1))[0]
                     error = self.error_function(
                         np.array(y[test_index][sample_id]), np.array([pred])
                     )
@@ -332,6 +347,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #[1, 2, 3]->TS1]
         #Step 2: Pass array [1,2,...,24,1,2,...]
         
+        
+
+    
         if self.pca is not None:
             print((X.shape[1]-1), self.pca.n_components)
             if self.pca.n_components > (X.shape[1]-1):
@@ -351,9 +369,22 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             ts_idx = np.arange(0, self.leadtime_k).reshape(-1, 1).repeat(int(X_feat.shape[0] / self.leadtime_k),
                                                                 axis=1).transpose().reshape(-1)
 
+        X_split = X_feat                                                        
+        if self.feature_split:
+            if len(X_feat.shape) != 2:
+                print("Incorrect input dimensionality.")
+                return
+            if len(self.feature_indizes) != len(self.ensembles_types):
+                print("Incorrect amount of feature indize lists.")
+                return
+            X_split = []
+            for sub_list in self.feature_indizes:
+                X_split.append(X_feat[:, sub_list])
+
+
+
         if len(y.shape) == 1:
             y = y.reshape(-1, 1)
-        num_samples = len(X)
 
         kf = KFold(n_splits=self.n_cv_out_of_sample_error)
         self.train_test_indexes = [
@@ -363,7 +394,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         if not self.should_fit:
             self._set_type()
-            self._create_error_matrix(X_feat, ts_idx, y)
+            self._create_error_matrix(X_split, ts_idx, y)
             self._get_global_error()
             # since all ensemble members of one type are duplicates, simply select the first one
             self.ensemble_members = [ensemble[0] for ensemble in self.ensemble_members]
@@ -371,21 +402,23 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         else:
             self.ensemble_members = []
             # fit ensemble members to create out of sample errors
-            self._fit_out_of_sample_ensembles(X_feat, y)
+            self._fit_out_of_sample_ensembles(X_split, y)
             # same as the local error
             self._set_type()
-            self._create_error_matrix(X_feat, ts_idx, y)
+            self._create_error_matrix(X_split, ts_idx, y)
             self._get_global_error()
             # refit ensemble members on complete data
-            self._fit_ensembles_for_prediction(X_feat, y)
+            self._fit_ensembles_for_prediction(X_split, y)
 
         # fit predictor to local error
         # Only use every leadtime_k-th element, as X-values are the same for a number of steps
-        self._fit_local_error_forecast(X_feat[self.start_indizes])
+        self._fit_local_error_forecast(X_feat)
         # calculate the time-based error matrix
         self._calculate_time_error()
 
     def _fit_local_error_forecast(self, X: np.ndarray):
+        X = X[self.start_indizes]
+
         self.local_error_forecaster = []
 
         for id_ens in range(len(self.ensemble_members)):
@@ -408,9 +441,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             y = y.ravel()
         self.t = self.t.reshape(-1, 1)
         for i, ensemble in enumerate(self.ensembles_types):
+            X_tmp = X if not self.feature_split else X[i]
             cv_ensembles = []
             for train_index, _ in self.train_test_indexes:
-                model = self._fit_one_model(ensemble, i, X[train_index], y[train_index])
+                model = self._fit_one_model(ensemble, i, X_tmp[train_index], y[train_index])
                 cv_ensembles.append(model)
             self.ensemble_members.append(cv_ensembles)
 
@@ -420,7 +454,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             y = y.ravel()
         self.ensemble_members = []
         for i, ensemble in enumerate(self.ensembles_types):
-            model = self._fit_one_model(ensemble, i, X, y)
+            X_tmp = X if not self.feature_split else X[i]
+            model = self._fit_one_model(ensemble, i, X_tmp, y)
             self.ensemble_members.append(model)
     
     def _fit_one_model(self, ensemble, i: int, X: np.ndarray, y: np.ndarray):
@@ -438,12 +473,14 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
     def _pred_all_ensembles(self, X: np.ndarray, ts_idx: np.ndarray):
         #predictions = np.zeros((int(len(X)/self.leadtime_k), self.leadtime_k, len(self.ensemble_members)))
-        predictions = np.zeros((len(X), self.leadtime_k, len(self.ensemble_members)))
+        len_X = len(X) if not self.feature_split else len(X[0])
+        predictions = np.zeros((len_X, self.leadtime_k, len(self.ensemble_members)))
         
         
         for id_em, ensemble_member in enumerate(self.ensemble_members):
+            X_split = X if not self.feature_split else X[id_em]
             coords = self._transform_time_matrix(ts_idx)
-            for i, sample in enumerate(X):
+            for i, sample in enumerate(X_split):
                 coord_1, coord_2 = coords[i]
                 pred = ensemble_member.predict(sample.reshape(1, -1))
                 predictions[coord_1, coord_2, id_em] = pred
@@ -519,10 +556,14 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #num_samples = int(X.shape[0]/self.leadtime_k) * self.leadtime_k
         # currently: remove the first elements of X to be able to predict all values in a matrix.
         # ToDo: Enable matrizes with not all entries filled (fit and predict)
-        #X = X[-num_samples:]
-        #X = X[:num_samples]
+        
+        
+
+
         if self.pca is not None:
             X = np.concatenate([self.pca.transform(X[:, :-1]), X[:, -1].reshape(-1, 1)], axis=1)
+        
+
         X_feat = X
         ts_idx = np.zeros([X_feat.shape[0], 1]).astype(int)        
         if X.shape[1] != 1 and self.leadtime_k > 1:
@@ -532,7 +573,19 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             ts_idx = np.arange(0, self.leadtime_k).reshape(-1, 1).repeat(int(X_feat.shape[0] / self.leadtime_k),
                                                                 axis=1).transpose().reshape(-1, 1)
         
-        predictions_ensembles = self._pred_all_ensembles(X_feat, ts_idx)
+        X_split = X_feat                                                        
+        if self.feature_split:
+            if len(X_feat.shape) != 2:
+                print("Incorrect input dimensionality.")
+                return
+            if len(self.feature_indizes) != len(self.ensembles_types):
+                print("Incorrect amount of feature indize lists.")
+                return
+            X_split = []
+            for sub_list in self.feature_indizes:
+                X_split.append(X_feat[:, sub_list])
+        
+        predictions_ensembles = self._pred_all_ensembles(X_split, ts_idx)
         predictions = self._weight_forecasts(X_feat, ts_idx, predictions_ensembles)
         predictions = predictions.flatten()[self.flatten_indizes]
         return predictions
