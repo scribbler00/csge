@@ -39,7 +39,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #type: str = 'regression',
         ensemble_parameters: list = [],
         probability: bool = False,
-        pca_components: int = 0
+        pca_components: int = 0,
+        time_lag: int = 1
     ):
         """
 
@@ -107,6 +108,21 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             raise Exception("Unable to process PCA and split features at once.")
 
         self.feature_split = False if len(self.feature_indizes) == 0 else True
+
+        if type(time_lag) == int:
+            self.time_lag = list(range(time_lag)) 
+        elif type(time_lag) == list:
+            is_valid = True
+            for i in time_lag:
+                if type(i) != int:
+                    is_valid = False
+            if is_valid:
+                self.time_lag = time_lag
+            else:
+                print("incorrect time_lag format.")
+                self.time_lag = [0]
+
+
 
     def get_params(self, deep):
         params = {}
@@ -286,27 +302,41 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         coords = self._transform_time_matrix(target_ids)
         self.error_matrix = None
 
-
         num_samples = len(X)
         if self.feature_split:
             num_samples = len(X[0])
         self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
+        # This could solve or cause issues, depending on the case. This will have to be tested further.
+        #self.error_matrix = np.zeros((self.leadtime_k, len(self.ensemble_members), num_samples))
         
+        max_coord_1 = 0
 
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
+            #WIP - currently only works for complete time-lag matrix
+            time_lag = ens_id % len(self.time_lag)
+            time_lag_val = self.time_lag[time_lag]
             X_split = X
             if self.feature_split:
-                X_split = X[ens_id]
+                # Ensure that all ensemble members of the same time use the same input, if time_lag is enabled
+                X_split = X[int(ens_id/len(self.time_lag))]
             running_index = 0
             # for each ensemble type, use the idx-th member of this type to predict the data is has not been trained on
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
+
+                shift_value = self.leadtime_k * time_lag_val
+                cut_value = X_split.shape[0] - shift_value
+                test_index = test_index[test_index<cut_value]
+
                 
                 for sample_id in range(len(test_index)):
                     ts_label = target_ids[running_index]
                     coord_1, coord_2 = coords[running_index]
+                    
+                    
+
                     pred = ensemble_member[idx].predict(X_split[test_index][sample_id].reshape(1, -1))[0]
                     error = self.error_function(
-                        np.array(y[test_index][sample_id]), np.array([pred])
+                        np.array(y[test_index + shift_value][sample_id]), np.array([pred])
                     )
                     # in case of classification, accuracy instead of error is needed
                     if self.type == 'classifier':
@@ -314,8 +344,9 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                     # put the calculated error in the matrix at the associated forecast range
                     self.error_matrix[coord_2, ens_id, coord_1] = error
                     running_index += 1
+                max_coord_1 = max(max_coord_1, coord_1)
         self.error_matrix = self.error_matrix.transpose()
-        self.error_matrix = self.error_matrix[:coord_1+1]
+        self.error_matrix = self.error_matrix[:max_coord_1+1]
         # shape: [num_sample_creations, num_ensemble_types, leadtime_k]
 
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -392,7 +423,6 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             (train_index, test_index) for train_index, test_index in kf.split(X)
         ]
 
-
         if not self.should_fit:
             self._set_type()
             self._create_error_matrix(X_split, ts_idx, y)
@@ -442,12 +472,27 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             y = y.ravel()
         self.t = self.t.reshape(-1, 1)
         for i, ensemble in enumerate(self.ensembles_types):
-            X_tmp = X if not self.feature_split else X[i]
-            cv_ensembles = []
-            for train_index, _ in self.train_test_indexes:
-                model = self._fit_one_model(ensemble, i, X_tmp[train_index], y[train_index])
-                cv_ensembles.append(model)
-            self.ensemble_members.append(cv_ensembles)
+            for time_lag in self.time_lag:
+                X_tmp = X if not self.feature_split else X[i]
+
+
+
+                # X_train = X_tmp[time_lag:]
+                
+                # y_train = y[:-time_lag]
+                # if time_lag == 0:
+                #     y_train = y
+
+
+                cv_ensembles = []
+                for train_index, _ in self.train_test_indexes:
+                    shift_value = self.leadtime_k * time_lag
+                    cut_value = X_tmp.shape[0] - shift_value
+                    train_index = train_index[train_index<cut_value]
+                    #model = self._fit_one_model(ensemble, i, X_tmp[train_index], y[train_index])
+                    model = self._fit_one_model(ensemble, i, X_tmp[train_index], y[train_index + shift_value])
+                    cv_ensembles.append(model)
+                self.ensemble_members.append(cv_ensembles)
 
     def _fit_ensembles_for_prediction(self, X: np.ndarray, y: np.ndarray):
         if self.leadtime_k == 1:
@@ -456,8 +501,17 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.ensemble_members = []
         for i, ensemble in enumerate(self.ensembles_types):
             X_tmp = X if not self.feature_split else X[i]
-            model = self._fit_one_model(ensemble, i, X_tmp, y)
-            self.ensemble_members.append(model)
+            for time_lag in self.time_lag:
+                shift_value = self.leadtime_k * time_lag
+                cut_value = X_tmp.shape[0] - shift_value
+
+                X_train = X_tmp[:cut_value]
+                y_train = y[shift_value:]
+
+                
+                #model = self._fit_one_model(ensemble, i, X_tmp, y)
+                model = self._fit_one_model(ensemble, i, X_train, y_train)
+                self.ensemble_members.append(model)
     
     def _fit_one_model(self, ensemble, i: int, X: np.ndarray, y: np.ndarray):
         model = ensemble()
@@ -479,7 +533,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         
         
         for id_em, ensemble_member in enumerate(self.ensemble_members):
-            X_split = X if not self.feature_split else X[id_em]
+            # Ensure that all ensemble members of the same time use the same input, if time_lag is enabled
+            X_split = X if not self.feature_split else X[int(id_em/len(self.time_lag))]
             coords = self._transform_time_matrix(ts_idx)
             for i, sample in enumerate(X_split):
                 coord_1, coord_2 = coords[i]
