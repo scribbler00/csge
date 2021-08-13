@@ -110,17 +110,26 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.feature_split = False if len(self.feature_indizes) == 0 else True
 
         if type(time_lag) == int:
-            self.time_lag = list(range(time_lag)) 
+            self.time_lag = list(range(time_lag))
+            self.time_lag = np.array(self.time_lag)
+            self.time_lag = np.repeat(self.time_lag[np.newaxis, :], len(self.ensembles_types), axis=0)
+            self.time_lag = self.time_lag.tolist()
+
         elif type(time_lag) == list:
-            is_valid = True
-            for i in time_lag:
-                if type(i) != int:
-                    is_valid = False
-            if is_valid:
+            if type(time_lag[0]) == list:
                 self.time_lag = time_lag
             else:
-                print("incorrect time_lag format.")
-                self.time_lag = [0]
+                self.time_lag = time_lag
+                self.time_lag = np.array(self.time_lag)
+                self.time_lag = np.repeat(self.time_lag[np.newaxis, :], len(self.ensembles_types), axis=0)
+                self.time_lag = self.time_lag.tolist()
+        
+        self.time_lag_flat = [i for sublist in self.time_lag for i in sublist]
+        
+        check_dtype = np.array(self.time_lag_flat)
+        if not check_dtype.dtype == 'int64':
+            print("Incorrect time_lag format. Disabled timelag usage.")
+            self.time_lag = [0] * len(self.ensembles_types)
 
 
 
@@ -210,6 +219,22 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
                 print(f"Given parameters: {list(self.ensemble_parameters[index].keys())}.\n")
                 print(f"Valid parameters: {list(model.get_params().keys())}.\n")
         return model
+
+    @staticmethod
+    def _get_nested_list_index(x, i):
+        j = 0
+        acc_len = 0
+        for sub_list in x:
+            acc_len += len(sub_list)
+            
+            if acc_len > i:
+                break
+            
+            
+            j+= 1
+        if i > acc_len:
+            print("Error in nested list slicing")
+        return j
 
     def _transform_time_matrix(self, ts_idx: np.ndarray):
         self.start_indizes = [0]
@@ -313,17 +338,20 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         for ens_id, ensemble_member in enumerate(self.ensemble_members):
             #WIP - currently only works for complete time-lag matrix
-            time_lag = ens_id % len(self.time_lag)
-            time_lag_val = self.time_lag[time_lag]
+            #time_lag = ens_id % len(self.time_lag)
+
+            #time_lag_val = self.time_lag[time_lag]
+            time_lag = self.time_lag_flat[ens_id]
             X_split = X
             if self.feature_split:
                 # Ensure that all ensemble members of the same time use the same input, if time_lag is enabled
-                X_split = X[int(ens_id/len(self.time_lag))]
+                X_split = X[self._get_nested_list_index(self.time_lag, ens_id)]
+                #X_split = X[int(ens_id/len(self.time_lag))]
             running_index = 0
             # for each ensemble type, use the idx-th member of this type to predict the data is has not been trained on
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
 
-                shift_value = self.leadtime_k * time_lag_val
+                shift_value = self.leadtime_k * time_lag
                 cut_value = X_split.shape[0] - shift_value
                 test_index = test_index[test_index<cut_value]
 
@@ -472,7 +500,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             y = y.ravel()
         self.t = self.t.reshape(-1, 1)
         for i, ensemble in enumerate(self.ensembles_types):
-            for time_lag in self.time_lag:
+            for time_lag in self.time_lag[i]:
                 X_tmp = X if not self.feature_split else X[i]
 
 
@@ -501,7 +529,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.ensemble_members = []
         for i, ensemble in enumerate(self.ensembles_types):
             X_tmp = X if not self.feature_split else X[i]
-            for time_lag in self.time_lag:
+            for time_lag in self.time_lag[i]:
                 shift_value = self.leadtime_k * time_lag
                 cut_value = X_tmp.shape[0] - shift_value
 
@@ -534,7 +562,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         
         for id_em, ensemble_member in enumerate(self.ensemble_members):
             # Ensure that all ensemble members of the same time use the same input, if time_lag is enabled
-            X_split = X if not self.feature_split else X[int(id_em/len(self.time_lag))]
+            #X_split = X if not self.feature_split else X[int(id_em/len(self.time_lag))]
+            X_split = X if not self.feature_split else X[self._get_nested_list_index(self.time_lag, id_em)]
             coords = self._transform_time_matrix(ts_idx)
             for i, sample in enumerate(X_split):
                 coord_1, coord_2 = coords[i]
