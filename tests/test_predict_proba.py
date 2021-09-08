@@ -9,7 +9,9 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn import datasets
 
-class TestPredictions:
+import unittest
+
+class TestPredictions(unittest.TestCase):
     def testPredictProba(self):
         np.random.seed(1337)
         dataset = sklearn.datasets.load_iris()
@@ -34,4 +36,8 @@ class TestPredictions:
         
         predictions = ensemble.predict(X_test)
         predictions_probabilities = ensemble.predict_proba(X_test)
-        assert (np.argmax(predictions_probabilities, axis=1) == predictions.flatten()).all()
+
+        self.assertTrue((np.argmax(predictions_probabilities, axis=1) == predictions.flatten()).all())
+
+if __name__ == '__main__':
+    unittest.main()

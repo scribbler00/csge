@@ -8,8 +8,11 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
 
-class TestFeatureSplitter:
-    def setUp(self):
+import unittest
+
+class TestTimelag(unittest.TestCase):
+    @classmethod
+    def setUpClass(self):
         self.seed = 1337
         self.leadtime = 10
         self.path = 'datasets/DAF_ICON_Synthetic_Wind_Power_processed/'
@@ -55,7 +58,7 @@ class TestFeatureSplitter:
         model.eta = [0, 3.5, 0]
         model.fit(x_axis, targets)
         y0 = model.predict(x_axis)
-        assert np.abs(np.mean(y0 - targets)) < 0.2
+        self.assertLess(np.abs(np.mean(y0 - targets)), 0.2)
 
     def test_timelag_leadtime(self):
         class f1:
@@ -96,7 +99,7 @@ class TestFeatureSplitter:
         model.leadtime_k = 6
         model.fit(x_axis_csge, targets_csge)
         y0 = model.predict(x_axis_csge).reshape(-1, 6)
-        assert np.isclose(y0, targets).all()
+        self.assertTrue(np.isclose(y0, targets).all())
 
 
     def test_timelag_featuresplit_leadtime(self):
@@ -153,5 +156,7 @@ class TestFeatureSplitter:
             pred = ensemble_csge.predict(X_test)
             error = [mean_absolute_error(pred.flatten()[ld::leadtime], y_test[ld::leadtime]) for ld in range(leadtime)]
             errors.append(error)
-        print(np.mean(errors))
-        assert np.mean(errors) < 0.3
+        self.assertLess(np.mean(errors), 0.3)
+
+if __name__ == '__main__':
+    unittest.main()

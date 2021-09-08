@@ -8,9 +8,10 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
 
-class TestBasicRegression:
-    def testGlobalWeighting(self):
+import unittest
 
+class TestBasicRegression(unittest.TestCase):
+    def testGlobalWeighting(self):
         class f1:
             def __init__(self):
                 self._estimator_type = 'regressor'
@@ -38,7 +39,7 @@ class TestBasicRegression:
         model.fit(x_axis, targets)
         
         y0 = model.predict(x_axis)
-        assert np.isclose(y0, targets).all()
+        self.assertTrue(np.isclose(y0, targets).all())
     
     def testLocalWeighting(self):
         class f1:
@@ -71,7 +72,7 @@ class TestBasicRegression:
         model.eta = [0, 3.5, 0]
         model.fit(x_axis, targets)
         y0 = model.predict(x_axis)
-        assert np.abs(np.mean(y0 - targets)) < 0.2
+        self.assertLess(np.abs(np.mean(y0 - targets)), 0.2)
     
     def testTimeWeighting(self):
         class f1:
@@ -112,5 +113,7 @@ class TestBasicRegression:
         model.leadtime_k = 6
         model.fit(x_axis_csge, targets_csge)
         y0 = model.predict(x_axis_csge).reshape(-1, 6)
-        assert np.isclose(y0, targets).all()
+        self.assertTrue(np.isclose(y0, targets).all())
 
+if __name__ == '__main__':
+    unittest.main()

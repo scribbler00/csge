@@ -89,7 +89,6 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.ensemble_parameters = ensemble_parameters
         self.probability = probability
         self.pca_components = pca_components
-        
         self.type = None
         self.ensemble_members = None
         self.error_matrix = None
@@ -282,7 +281,8 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         """
         # the slicing is due to this error not being time-dependent, thus only one index of this axis suffices
-        self.global_errors = (1 / self.error_matrix[:,:,0].mean(0)).reshape(1, -1)
+        #self.global_errors = (1 / self.error_matrix[:,:,0].mean(0)).reshape(1, -1)
+        self.global_errors = (1 / self.error_matrix.mean(0).mean(1)).reshape(1, -1)
 
     def _set_type(self):
         method = None

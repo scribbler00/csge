@@ -7,13 +7,12 @@ from csge.csge import CoopetitiveSoftGatingEnsemble as CSGE
 from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import GridSearchCV
 
+import unittest
 
-import random
-
-class TestGridsearch:
-    def setUp(self):
+class TestFeatureSplitter(unittest.TestCase):
+    @classmethod
+    def setUpClass(self):
         self.seed = 1337
         self.leadtime = 10
         self.path = 'datasets/DAF_ICON_Synthetic_Wind_Power_processed/'
@@ -27,13 +26,19 @@ class TestGridsearch:
                 data_power = store.get('powerdata')
             power_data_all = pd.concat([power_data_all, data_power])
         self.power_data_all = power_data_all.sort_index()
-
-    def testGridsearch(self):
+    def test_feature_split(self):
         self.setUp()
         leadtime = 10
         power_data = self.power_data_all.sample(n=1000, random_state = self.seed)
         input_df = power_data.loc[:, power_data.columns != 'PowerGeneration']
         target_df = power_data['PowerGeneration']
+
+        feature_indizes = [
+            [0,1,4,7],
+            [1,5,8,13,14,15,16],
+            [20,21,22,23],
+            [1,2,3,4,5,6,7,8,9,10]
+        ]
         
 
         X = input_df.to_numpy()
@@ -45,44 +50,36 @@ class TestGridsearch:
         X = X_res
         y = y[:X_res.shape[0]]
 
-        eta=[3.5, 3.5, 100]
+        kf = sklearn.model_selection.KFold(n_splits=10)
+        kf.get_n_splits(X)
+
+        errors = []
+
+
+        eta=[3.5, 3.5, 3.5]
         f1 = sklearn.linear_model.LinearRegression
         f2 = sklearn.linear_model.Ridge
         f3 = sklearn.linear_model.Lasso
         f4 = sklearn.tree.DecisionTreeRegressor
-
         ensemble_csge = CSGE(
-            #ensembles = [LinearRegression, sklearn.svm.SVR, tree.DecisionTreeRegressor],
             ensembles_types = [f1, f2, f3, f4],
+            feature_indizes=feature_indizes,
             error_function=mean_absolute_error,
-            #eta=[3.5, 3.5, 0],
             eta=eta,
             leadtime_k = leadtime,
-            #type='regression',
             )
-        
-        etas = []
-        etas.append([3.5, 3.5, 3.5])
-        etas.append([3.5, 1, 3.5])
-        etas.append([3.5, 0, 3.5])
-        etas.append([3.5, 3.5, 1])
-        etas.append([3.5, 3.5, 0])
-        etas.append([1, 3.5, 3.5])
-        etas.append([1, 1, 3.5])
-        etas.append([1, 0, 3.5])
-        etas.append([1, 3.5, 1])
-        etas.append([1, 3.5, 0])
-        etas.append([0, 3.5, 3.5])
-        etas.append([0, 1, 3.5])
-        etas.append([0, 0, 3.5])
-        etas.append([0, 3.5, 1])
-        etas.append([0, 3.5, 0])
 
-        parameters = {}
-        parameters['eta'] = etas
+        for train_index, test_index in kf.split(X):
+            X_train = X[train_index]
+            y_train = y[train_index]
 
-        clf = GridSearchCV(ensemble_csge, parameters, scoring='neg_mean_absolute_error')
-        clf.fit(X, y)
-        res_df = pd.DataFrame(clf.cv_results_)
+            X_test = X[test_index]
+            y_test = y[test_index]
+            ensemble_csge.fit(X_train, y_train)
+            pred = ensemble_csge.predict(X_test)
+            error = [mean_absolute_error(pred.flatten()[ld::leadtime], y_test[ld::leadtime]) for ld in range(leadtime)]
+            errors.append(error)
+        self.assertLess(np.mean(errors), 0.3)
 
-        assert len(res_df) == len(etas)
+if __name__ == '__main__':
+    unittest.main()

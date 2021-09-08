@@ -8,8 +8,11 @@ from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.neighbors import KNeighborsClassifier
 
-class TestDataloader:
-    def setUp(self):
+import unittest
+
+class TestDataloader(unittest.TestCase):
+    @classmethod
+    def setUpClass(self):
         self.seed = 1337
         self.leadtime = 10
         self.path = 'datasets/DAF_ICON_Synthetic_Wind_Power_processed/'
@@ -68,4 +71,7 @@ class TestDataloader:
             pred = ensemble_csge.predict(X_test)
             error = [mean_absolute_error(pred.flatten()[ld::leadtime], y_test[ld::leadtime]) for ld in range(leadtime)]
             errors.append(error)
-        assert np.mean(errors) < 0.3
+        self.assertLess(np.mean(errors), 0.3)
+
+if __name__ == '__main__':
+    unittest.main()
