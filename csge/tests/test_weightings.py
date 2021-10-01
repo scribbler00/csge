@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import os
 import sklearn
+from sklearn.base import BaseEstimator
+
 from csge.csge import CoopetitiveSoftGatingEnsemble as CSGE
 
 from sklearn.metrics import mean_absolute_error
@@ -11,15 +13,17 @@ from sklearn.neighbors import KNeighborsClassifier
 class TestBasicRegression:
     def testGlobalWeighting(self):
 
-        class f1:
+        class f1(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 return np.reshape(np.sin(X), [-1, 1])
-        class f2:
+        class f2(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
@@ -33,7 +37,7 @@ class TestBasicRegression:
         targets = g(x_axis, 4)
         targets = np.reshape(targets, [-1, 1])
 
-        model = CSGE([f1, f2], error_function=mean_absolute_error)
+        model = CSGE([('f1', f1()), ('f2', f2())], error_function=mean_absolute_error)
         model.eta = [1, 0, 0]
         model.fit(x_axis, targets)
         
@@ -41,15 +45,17 @@ class TestBasicRegression:
         assert np.isclose(y0, targets).all()
     
     def testLocalWeighting(self):
-        class f1:
+        class f1(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 return np.reshape(np.sin(X), [-1, 1])
-        class f2:
+        class f2(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
@@ -67,23 +73,25 @@ class TestBasicRegression:
         x_axis = np.reshape(x_axis, [-1, 1])
         targets = g(x_axis)
         targets = np.reshape(targets, [-1, 1])
-        model = CSGE([f1, f2], error_function=mean_absolute_error, model_forecast_local_error=RandomForestRegressor)
+        model = CSGE([('f1', f1()), ('f2', f2())], error_function=mean_absolute_error, model_forecast_local_error=RandomForestRegressor)
         model.eta = [0, 3.5, 0]
         model.fit(x_axis, targets)
         y0 = model.predict(x_axis)
         assert np.abs(np.mean(y0 - targets)) < 0.2
     
     def testTimeWeighting(self):
-        class f1:
+        class f1(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
             def predict(self, X):
                 res = np.sin(X).reshape(-1)
                 return res
-        class f2:
+        class f2(BaseEstimator):
             def __init__(self):
+                BaseEstimator.__init__(self)
                 self._estimator_type = 'regressor'
             def fit(self, X, y):
                 return
@@ -107,7 +115,7 @@ class TestBasicRegression:
 
         x_axis_csge = x_axis.repeat(6, axis=1).reshape(-1, 1)
         targets_csge = targets.reshape(-1, 1)
-        model = CSGE([f1, f2], error_function=mean_absolute_error)
+        model = CSGE([('f1', f1()), ('f2', f2())], error_function=mean_absolute_error)
         model.eta = [0, 0, 3.5]
         model.leadtime_k = 6
         model.fit(x_axis_csge, targets_csge)
