@@ -1,7 +1,8 @@
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, clone
 
 from itertools import product
 
+from sklearn.ensemble._base import _BaseHeterogeneousEnsemble
 from sklearn.neighbors import NearestNeighbors
 from scipy.optimize import minimize, optimize
 import numpy as np
@@ -16,16 +17,15 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.decomposition import PCA
 
 from sklearn.base import is_classifier, is_regressor
+from sklearn.utils import Bunch
 
-from csge import utils
-
+from .utils import soft_gating_formular
 import inspect
 
-class CoopetitiveSoftGatingEnsemble(BaseEstimator):
+class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
     def __init__(
         self,
-        #ensembles: list,
-        ensembles_types: list,
+        estimators: list,
         error_function = mean_squared_error,
         optimization_method = "Newton-CG",
         n_cv_out_of_sample_error: int = 3,
@@ -44,8 +44,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         Parameters
         ----------
-        ensembles : list of classes
-            all classes must have .fit() and .predict()
+        estimators : list of (str, estimator) tuples
+            Base estimators which will be combined by the coopetitive soft gating ensemble.
+            Each element of the list is defined as a tuple of string (i.e. name) and an estimator instance.
+            TODO: Implement  An estimator can be set to 'drop' using set_params.
         error_function : function
             the metric/function used to calculate the error for a given input
         optimization_method : function
@@ -69,12 +71,21 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             a list containing a dictionary of parameters for each ensemble member
         probability : True
             determines whether `predict_proba` is enabled for classification
+
+         Attributes
+        ----------
+        estimators_ : list of classifiers
+            The collection of fitted sub-estimators as defined in ``estimators``.
+
+        named_estimators_ : :class:`~sklearn.utils.Bunch`
+            Attribute to access any fitted sub-estimators by name.
+
         """
         # TODO: ensembles as list or dict,in case of list default parameters, otherwise those provided by the dict
         # TODO: add check if parameters for ensemble member are correct
         # TODO: add function to get name from ensemble member
 
-        self.ensembles_types = ensembles_types
+        self.estimators = estimators
         self.error_function = error_function
         self.optimization_method = optimization_method
         self.eta = eta
@@ -86,7 +97,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self.type = None
         self.probability = probability
         
-        self.ensemble_members = None
+        self.estimators_ = None
         self.error_matrix = None
         self.ensemble_parameters = ensemble_parameters
         self.should_fit=True
@@ -139,7 +150,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             each ensemble member has to have the attribute '_estimator_type', and be either 'regressor' or 'classifier'
         """
         # duplicate the ensemble member to create the error_matrix
-        self.ensemble_members=[[ensemble_member] * self.n_cv_out_of_sample_error for ensemble_member in ensembles]
+        self.estimators_=[[ensemble_member] * self.n_cv_out_of_sample_error for ensemble_member in ensembles]
         self.should_fit = False
 
     def _set_ensemble_parameters(self, parameters: list):
@@ -155,7 +166,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
 
         """
         try:
-            assert len(parameters) == len(self.ensembles_types)
+            assert len(parameters) == len(self.estimators)
             for params in parameters:
                 assert type(params) == dict
         except AssertionError:
@@ -238,15 +249,15 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def _set_type(self):
         method = None
         assumption = None
-        if is_classifier(self.ensemble_members[0][0]):
+        if is_classifier(self.estimators_[0][0]):
             assumption = 'classifier'
             method = is_classifier
-        elif is_regressor(self.ensemble_members[0][0]):
+        elif is_regressor(self.estimators_[0][0]):
             assumption = 'regressor'
             method = is_regressor
         if method is not None:
             check = True
-            for ensemble_member in self.ensemble_members:
+            for ensemble_member in self.estimators_:
                 if not method(ensemble_member[0]):
                     check = False
             if check:
@@ -278,10 +289,10 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         coords = self._transform_time_matrix(target_ids)
         self.error_matrix = None
         num_samples = len(X)
-        self.error_matrix = np.ones((self.leadtime_k, len(self.ensemble_members), num_samples))
+        self.error_matrix = np.ones((self.leadtime_k, len(self.estimators_), num_samples))
         
 
-        for ens_id, ensemble_member in enumerate(self.ensemble_members):
+        for ens_id, ensemble_member in enumerate(self.estimators_):
             running_index = 0
             # for each ensemble type, use the idx-th member of this type to predict the data is has not been trained on
             for idx, (_, test_index) in enumerate(self.train_test_indexes):
@@ -331,6 +342,11 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         #[1, 2, 3]->TS5]
         #[1, 2, 3]->TS1]
         #Step 2: Pass array [1,2,...,24,1,2,...]
+
+
+        # validate estimators
+        # TODO: instanciate from _BaseHeterogeneousEnsemble and then this method below should be available
+        #names, estimators = self._validate_estimators()
         
         if self.pca is not None:
             print((X.shape[1]-1), self.pca.n_components)
@@ -366,11 +382,12 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             self._create_error_matrix(X_feat, ts_idx, y)
             self._get_global_error()
             # since all ensemble members of one type are duplicates, simply select the first one
-            self.ensemble_members = [ensemble[0] for ensemble in self.ensemble_members]
+            self.estimators_ = [ensemble[0] for ensemble in self.estimators]
             
         else:
-            self.ensemble_members = []
+            self.estimators_ = []
             # fit ensemble members to create out of sample errors
+            # TODO: _fit_out_of_sample_ensembles should not store its estimators in self.estimators_
             self._fit_out_of_sample_ensembles(X_feat, y)
             # same as the local error
             self._set_type()
@@ -378,6 +395,15 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             self._get_global_error()
             # refit ensemble members on complete data
             self._fit_ensembles_for_prediction(X_feat, y)
+
+            # put fitted estimators in Bunch
+            self.named_estimators_ = Bunch()
+
+            # Uses 'drop' as placeholder for dropped estimators
+            est_iter = iter(self.estimators_)
+            for name, est in self.estimators:
+                current_est = est if est == "drop" else next(est_iter)
+                self.named_estimators_[name] = current_est
 
         # fit predictor to local error
         # Only use every leadtime_k-th element, as X-values are the same for a number of steps
@@ -388,7 +414,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
     def _fit_local_error_forecast(self, X: np.ndarray):
         self.local_error_forecaster = []
 
-        for id_ens in range(len(self.ensemble_members)):
+        for id_ens in range(len(self.estimators_)):
             self.local_error_forecaster.append(
                 self.model_forecast_local_error().fit(X, self.error_matrix[:, id_ens, 0])
             )
@@ -407,41 +433,41 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
             # ravel to remove add. dimension unnecessary for fitting
             y = y.ravel()
         self.t = self.t.reshape(-1, 1)
-        for i, ensemble in enumerate(self.ensembles_types):
+
+        for i, (name, estimator) in enumerate(self.estimators):
             cv_ensembles = []
             for train_index, _ in self.train_test_indexes:
-                model = self._fit_one_model(ensemble, i, X[train_index], y[train_index])
+                model = self._fit_single_estimator(clone(estimator), i, X[train_index], y[train_index])
                 cv_ensembles.append(model)
-            self.ensemble_members.append(cv_ensembles)
+            self.estimators_.append(cv_ensembles)
 
     def _fit_ensembles_for_prediction(self, X: np.ndarray, y: np.ndarray):
         if self.leadtime_k == 1:
             # ravel to remove add. dimension unnecessary for fitting
             y = y.ravel()
-        self.ensemble_members = []
-        for i, ensemble in enumerate(self.ensembles_types):
-            model = self._fit_one_model(ensemble, i, X, y)
-            self.ensemble_members.append(model)
+        self.estimators_ = []
+        for i, (name, estimator) in enumerate(self.estimators):
+            estimator_ = self._fit_single_estimator(clone(estimator), i, X, y)
+            self.estimators_.append(estimator_)
     
-    def _fit_one_model(self, ensemble, i: int, X: np.ndarray, y: np.ndarray):
-        model = ensemble()
+    def _fit_single_estimator(self, estimator, i: int, X: np.ndarray, y: np.ndarray):
         if len(y.shape) > 1:
             if y.shape[1] == 1:
                 y = y.flatten()
 
         # if predict_proba has been enabled, pass this parameter to all models to enable it
-        if hasattr(model, 'probability'):
-            model.probability = self.probability
-        model = self._assign_params(i, model)
-        model.fit(X, y)
-        return model
+        if hasattr(estimator, 'probability'):
+            estimator.probability = self.probability
+        estimator = self._assign_params(i, estimator)
+        estimator.fit(X, y)
+        return estimator
 
     def _pred_all_ensembles(self, X: np.ndarray, ts_idx: np.ndarray):
         #predictions = np.zeros((int(len(X)/self.leadtime_k), self.leadtime_k, len(self.ensemble_members)))
-        predictions = np.zeros((len(X), self.leadtime_k, len(self.ensemble_members)))
+        predictions = np.zeros((len(X), self.leadtime_k, len(self.estimators_)))
         
         
-        for id_em, ensemble_member in enumerate(self.ensemble_members):
+        for id_em, ensemble_member in enumerate(self.estimators_):
             coords = self._transform_time_matrix(ts_idx)
             for i, sample in enumerate(X):
                 coord_1, coord_2 = coords[i]
@@ -451,7 +477,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         return predictions
 
     def _pred_local_error(self, X: np.ndarray):
-        local_errors = np.zeros((len(X), len(self.ensemble_members)))
+        local_errors = np.zeros((len(X), len(self.estimators_)))
         for id_em, local_error_member in enumerate(self.local_error_forecaster):
             local_errors[:, id_em] = local_error_member.predict(X)
 
@@ -467,18 +493,18 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         # apply the softgating function to select the linearity.
         # shape: [1, len(ensemble_members)]
         normalized_global_error = self._normalize_weighting(self.global_errors)
-        normalized_global_error = utils.soft_gating_formular(normalized_global_error, self.eta[0])
+        normalized_global_error = soft_gating_formular(normalized_global_error, self.eta[0])
         # predict the local error of all ensemble members for each input separately.
         # apply the softgating function to select the linearity.
         # shape: [num_sample_creations, len(ensemble_members)]
         #self.local_errors = 1 / (self._pred_local_error(X[::self.leadtime_k]) + self.eps)
         self.local_errors = 1 / (self._pred_local_error(X[self.start_indizes]) + self.eps)
-        self.local_errors = utils.soft_gating_formular(self.local_errors, self.eta[1])
+        self.local_errors = soft_gating_formular(self.local_errors, self.eta[1])
         # calculate the time errors based on the time error matrix.
         # apply the softgating function to select the linearity.
         # shape: [leadtime_k, len(ensemble_members)]
         self.time_errors = 1 / (self.time_error_matrix + self.eps)
-        self.time_errors = utils.soft_gating_formular(self.time_errors, self.eta[2])
+        self.time_errors = soft_gating_formular(self.time_errors, self.eta[2])
         # multiply both error types.
         # this weights the local errors, i.e. the error of a given input, with the average error of the ensemble member
         # over the whole input space it has been trained on.
@@ -570,7 +596,7 @@ class CoopetitiveSoftGatingEnsemble(BaseEstimator):
         self._calc_final_weighting(X_feat, ts_idx)
 
         predictions = []
-        for ensemble_member in self.ensemble_members:
+        for ensemble_member in self.estimators_:
             predictions.append(ensemble_member.predict_proba(X_feat))
         predictions = np.array(predictions)
         predictions = predictions.swapaxes(0, 2)
