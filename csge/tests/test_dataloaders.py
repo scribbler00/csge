@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import sklearn
-from csge.csge import CoopetitiveSoftGatingEnsemble as CSGE
+from csge.csge import CSGERegressor as CSGE
 
 from sklearn.metrics import mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor

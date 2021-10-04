@@ -1,4 +1,4 @@
-from sklearn.base import BaseEstimator, clone
+from sklearn.base import BaseEstimator, clone, RegressorMixin
 
 from itertools import product
 
@@ -9,7 +9,7 @@ import numpy as np
 
 from sklearn.metrics import mean_squared_error
 from sklearn.base import BaseEstimator
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, check_cv
 from sklearn.model_selection import cross_validate
 from sklearn.model_selection import KFold
 from sklearn.exceptions import NotFittedError
@@ -22,13 +22,13 @@ from sklearn.utils import Bunch
 from .utils import soft_gating_formular
 import inspect
 
-class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
+class CSGERegressor(RegressorMixin, _BaseHeterogeneousEnsemble):
     def __init__(
         self,
         estimators: list,
         error_function = mean_squared_error,
         optimization_method = "Newton-CG",
-        n_cv_out_of_sample_error: int = 3,
+        cv=None,
         model_forecast_local_error = RandomForestRegressor,
         eta: list = [3.5, 3.5, 3.5],
         eps: float = 0.00000001,
@@ -52,8 +52,29 @@ class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
             the metric/function used to calculate the error for a given input
         optimization_method : function
             currently not used
-        n_cv_out_of_sample_error : int
-            defines the amount of chunks the train data is to be split
+         cv : int, cross-validation generator or an iterable, default=None
+            Determines the cross-validation splitting strategy used in
+            `cross_val_predict` to train `final_estimator`. Possible inputs for
+            cv are:
+
+            * None, to use the default 5-fold cross validation,
+            * integer, to specify the number of folds in a (Stratified) KFold,
+            * An object to be used as a cross-validation generator,
+            * An iterable yielding train, test splits.
+
+            For integer/None inputs, if the estimator is a classifier and y is
+            either binary or multiclass,
+            :class:`~sklearn.model_selection.StratifiedKFold` is used.
+            In all other cases, :class:`~sklearn.model_selection.KFold` is used.
+            These splitters are instantiated with `shuffle=False` so the splits
+            will be the same across calls.
+            Refer :ref:`User Guide <cross_validation>` for the various
+            cross-validation strategies that can be used here.
+            .. note::
+               A larger number of split will provide no benefits if the number
+               of training samples is large enough. Indeed, the training time
+               will increase. ``cv`` is not used for model evaluation but for
+               prediction.
         model_forecast_local_error : function
             method used to calculate the local error
         eta : list of int
@@ -91,7 +112,7 @@ class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
         self.eta = eta
         self.eps = eps
         self.n_jobs = n_jobs
-        self.n_cv_out_of_sample_error = n_cv_out_of_sample_error
+        self.cv = cv
         self.model_forecast_local_error = model_forecast_local_error
         self.leadtime_k = leadtime_k
         self.type = None
@@ -150,7 +171,7 @@ class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
             each ensemble member has to have the attribute '_estimator_type', and be either 'regressor' or 'classifier'
         """
         # duplicate the ensemble member to create the error_matrix
-        self.estimators_=[[ensemble_member] * self.n_cv_out_of_sample_error for ensemble_member in ensembles]
+        self.estimators_=[[ensemble_member] * self.cv for ensemble_member in ensembles]
         self.should_fit = False
 
     def _set_ensemble_parameters(self, parameters: list):
@@ -371,9 +392,16 @@ class CoopetitiveSoftGatingEnsemble(_BaseHeterogeneousEnsemble):
             y = y.reshape(-1, 1)
         num_samples = len(X)
 
-        kf = KFold(n_splits=self.n_cv_out_of_sample_error)
+        # To ensure that the data provided to each estimator are the same, we
+        # need to set the random state of the cv if there is one and we need to
+        # take a copy.
+        cv = check_cv(self.cv, y=y, classifier=is_classifier(self))
+        if hasattr(cv, "random_state") and cv.random_state is None:
+            cv.random_state = np.random.RandomState()
+
+        # store the train/ test indices
         self.train_test_indexes = [
-            (train_index, test_index) for train_index, test_index in kf.split(X)
+            (train_index, test_index) for train_index, test_index in cv.split(X)
         ]
 
 

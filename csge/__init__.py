@@ -1,1 +1,1 @@
-from .csge import CoopetitiveSoftGatingEnsemble
+from .csge import CSGERegressor
